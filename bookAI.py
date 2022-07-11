@@ -6,6 +6,14 @@ from spacytextblob.spacytextblob import SpacyTextBlob
 import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import numpy as np
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
+
+cred = credentials.Certificate("firebase_admin_key.json")
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 
 nlp = spacy.load("en_core_web_sm")
@@ -33,13 +41,25 @@ def get_book(title):
 
 
 def clean_book(book, title):
-    BEGINNNING_STRING = f"*** START OF THE PROJECT GUTENBERG EBOOK {title.upper()} ***"
-    idx = book.index(BEGINNNING_STRING)
-    book = book[idx + len(BEGINNNING_STRING):]
+    idx = -1
+    i = 0
+    beginning_strings = list(textget.TEXT_START_MARKERS)
+    while idx == -1:
+        beginning_string = beginning_strings[i]
+        idx = book.find(beginning_string)
+        i += 1
+
+    book = book[idx + len(beginning_string):]
 
     # remove Gutenberg nonsense at the end
-    ENDING_STRING = f"*** END OF THE PROJECT GUTENBERG EBOOK {title.upper()} ***"
-    idx = book.index(ENDING_STRING)
+    idx = -1
+    i = 0
+    ending_strings = list(textget.TEXT_END_MARKERS)
+    while idx == -1:
+        ending_string = ending_strings[i]
+        idx = book.find(ending_string)
+        i += 1
+
     book = book[: idx]
 
     return book
@@ -86,14 +106,30 @@ def get_character_sentences(character, doc):
     return character_sentences
 
 
+def get_most_and_least_positive_sentences(doc, character_analysis):
+    # sort polarity scores in descending order
+    character_analysis = sorted(character_analysis, key=lambda item: item[1])
+
+    # find the top and bottom 10 percent of sentences
+    ten_percent = len(character_analysis) // 10
+    most_positive_indices = character_analysis[: ten_percent]
+    least_positive_indices = character_analysis[-ten_percent:]
+    most_positive_sentences, least_positive_sentences = [], []
+    for (most_positive_idx, _), (least_positive_idx, _) in zip(most_positive_indices, least_positive_indices):
+        most_positive_sentences.append(doc[most_positive_idx].sent.text)
+        least_positive_sentences.append(doc[least_positive_idx].sent.text)
+
+    return most_positive_sentences, least_positive_sentences
+
+
 def get_character_analysis(character, doc):
     character_sentences = get_character_sentences(character, doc)
-    return [(idx, sentence._.blob.polarity) for idx, sentence in character_sentences]
+    analysis = [(idx, sentence._.blob.polarity) for idx, sentence in character_sentences]
+    return analysis
 
 
-def get_book_analysis(doc):
+def get_book_analysis(window, doc):
     sents = list(doc.sents)
-    window = 50
     scores = []
 
     for i in tqdm(range(len(sents) - window)):
@@ -104,37 +140,65 @@ def get_book_analysis(doc):
     return scores
 
 
-if __name__ == "__main__":
+def main(title, save_to_db=True):
     # get book from project gutenberg
-    book = get_book('The Great Gatsby')
+    book = get_book(title)
 
     # load book into nlp analyzer
-    print('loading book into SpaCy')
+    if len(book) > 1e6:
+        print('too large')
+        print(len(book))
+        return
     doc = nlp(book)
-    print('done.')
+    number_of_sentences = len(list(doc.sents))
+    number_of_words = len(list(doc))
 
     # get most popular characters in novel
     character_occurrences = get_characters(doc)
     characters = list(character_occurrences.keys())
 
-    print('-----Top characters and number of references-----')
-    print(character_occurrences)
-
     characters_analysis = {character: get_character_analysis(character, doc) for character in characters}
-    for character, analysis in characters_analysis.items():
-        print(f'{character} has an average polarity of {sum([score for _, score in analysis]) / len(analysis)}')
+    average_characters_polarity = {
+        character: sum([score for _, score in analysis]) / len(analysis)
+        for character, analysis in characters_analysis.items()
+    }
 
-    for i, character in enumerate(characters):
+    book_analysis_window = 50
+    book_analysis = get_book_analysis(book_analysis_window, doc)
+
+    characters_json = []
+    for character, occurrence_count in character_occurrences.items():
+        most_positive_sentences, least_positive_sentences = get_most_and_least_positive_sentences(
+            doc, characters_analysis[character]
+        )
+
         print(character)
-        plt.figure(i)
-        indices = [idx for idx, _ in characters_analysis[character]]
-        scores = [score for _, score in characters_analysis[character]]
-        plt.scatter(indices, scores, label=character)
-        plt.title(character)
-        plt.show()
+        print(most_positive_sentences)
+        print(least_positive_sentences)
+        print('-----')
 
-    scores = get_book_analysis(doc)
-    plt.figure(i + 1)
-    plt.title('Total Book Polarity')
-    plt.plot(range(len(scores)), scores)
-    plt.show()
+        characters_json.append({
+            'name': character,
+            'occurrence_count': occurrence_count,
+            'avg_polarity': average_characters_polarity[character],
+            'sentiment_analysis_scores': [score for _, score in characters_analysis[character]],
+            'sentiment_analysis_indices': [idx for idx, _ in characters_analysis[character]],
+            'most_positive_sentences': most_positive_sentences,
+            'least_positive_sentences': least_positive_sentences
+        })
+
+    if save_to_db:
+        doc_ref = db.collection('book').document(title)
+        doc_ref.set({
+            'title': title,
+            'word_count': number_of_words,
+            'sentence_count': number_of_sentences,
+            'book_analysis': book_analysis,
+            'book_analysis_window': book_analysis_window,
+            'characters': characters_json
+        })
+
+
+if __name__ == "__main__":
+    title = 'The Great Gatsby'
+    main(title, save_to_db=False)
