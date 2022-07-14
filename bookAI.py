@@ -108,18 +108,23 @@ def get_character_sentences(character, doc):
 
 def get_most_and_least_positive_sentences(doc, character_analysis):
     # sort polarity scores in descending order
-    character_analysis = sorted(character_analysis, key=lambda item: item[1])
+    character_analysis = sorted(character_analysis, key=lambda item: item[1], reverse=True)
 
     # find the top and bottom 10 percent of sentences
     ten_percent = len(character_analysis) // 10
     most_positive_indices = character_analysis[: ten_percent]
     least_positive_indices = character_analysis[-ten_percent:]
-    most_positive_sentences, least_positive_sentences = [], []
-    for (most_positive_idx, _), (least_positive_idx, _) in zip(most_positive_indices, least_positive_indices):
-        most_positive_sentences.append(doc[most_positive_idx].sent.text)
-        least_positive_sentences.append(doc[least_positive_idx].sent.text)
+    most_positive_sentences, least_positive_sentences = set(), set()
+    for (most_positive_idx, positive_score), (least_positive_idx, negative_score) in zip(most_positive_indices, least_positive_indices):
+        assert positive_score >= negative_score, 'not sorting in correct order'
+        positive_text, negative_text = doc[most_positive_idx].sent.text, doc[least_positive_idx].sent.text
+        if positive_text not in most_positive_sentences:
+            most_positive_sentences.add(doc[most_positive_idx].sent.text)
 
-    return most_positive_sentences, least_positive_sentences
+        if negative_text not in least_positive_sentences:
+            least_positive_sentences.add(doc[least_positive_idx].sent.text)
+
+    return list(most_positive_sentences), list(least_positive_sentences)
 
 
 def get_character_analysis(character, doc):
@@ -168,23 +173,13 @@ def main(title, save_to_db=True):
 
     characters_json = []
     for character, occurrence_count in character_occurrences.items():
-        most_positive_sentences, least_positive_sentences = get_most_and_least_positive_sentences(
-            doc, characters_analysis[character]
-        )
-
-        print(character)
-        print(most_positive_sentences)
-        print(least_positive_sentences)
-        print('-----')
-
         characters_json.append({
             'name': character,
             'occurrence_count': occurrence_count,
             'avg_polarity': average_characters_polarity[character],
             'sentiment_analysis_scores': [score for _, score in characters_analysis[character]],
             'sentiment_analysis_indices': [idx for idx, _ in characters_analysis[character]],
-            'most_positive_sentences': most_positive_sentences,
-            'least_positive_sentences': least_positive_sentences
+            'sentiment_analysis_sentences': [doc[idx].sent.text for idx, _ in characters_analysis[character]],
         })
 
     if save_to_db:
@@ -200,5 +195,6 @@ def main(title, save_to_db=True):
 
 
 if __name__ == "__main__":
-    title = 'The Great Gatsby'
-    main(title, save_to_db=False)
+    titles = ['Heart of Darkness', 'The Great Gatsby']
+    for title in titles:
+        main(title, save_to_db=True)
