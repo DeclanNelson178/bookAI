@@ -52,6 +52,7 @@ const CharacterCard = ({ novel }) => {
                 }
             });
         }
+        console.log(datapoints)
         
         return datapoints;
     }
@@ -66,7 +67,12 @@ const CharacterCard = ({ novel }) => {
         legend: {
             cursor: "pointer",
         },
-        data: getData()
+        axisX: {
+            lineThickness: 0,
+            labelFormatter: () => '',
+            tickLength: 0
+        },
+        data: getData(),
     }
 
     return (
