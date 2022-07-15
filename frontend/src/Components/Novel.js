@@ -19,7 +19,7 @@ const Novel = ({ novel }) => {
     return (
         <>
             <NovelCard novel={novel}/>
-            {getCharacterCards()}
+            <CharacterCard novel={novel} />
         </>
     )
 }
