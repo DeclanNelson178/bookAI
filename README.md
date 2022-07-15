@@ -1,6 +1,6 @@
 # bookAI
 
-This project seeks leverage natural language processing to gain insight into classic works of fiction. Works used are available at Project Gutenberg (https://gutenberg.org).
+This project seeks leverage natural language processing to gain insight into classic works of fiction. Works used are available through Project Gutenberg (https://gutenberg.org).
 
 ## Analysis
 
